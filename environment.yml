@@ -1,0 +1,23 @@
+name: doc_eval_env
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11  # Keep Python 3.11
+  - sentencepiece  # Conda can often handle this C++ dependency
+  - pandoc
+  - cmake
+  - ghostscript
+  - nltk
+  - sacrebleu
+  # REMOVED from here: - bert-score
+  # REMOVED from here: - unbabel-comet
+  - pypandoc
+  - beautifulsoup4
+  - pdfminer.six
+  - markdown
+  - pillow
+  - pip  # Ensure pip itself is installed by conda
+  - pip:
+    - bert-score
+    - unbabel-comet
