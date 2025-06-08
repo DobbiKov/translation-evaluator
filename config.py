@@ -19,7 +19,7 @@ LANG_PAIRS = [
 ]
 
 # Document formats to process
-DOC_FORMATS = ['latex'] 
+DOC_FORMATS = ['markdown'] 
 
 # NL Metrics to run
 RUN_BLEU = True
