@@ -10,7 +10,7 @@ It supports common metrics (BLEU, chrF, TER) as well as recent neural metrics (B
 1. Clone the repository:
 ```sh
 git clone https://github.com/DobbiKov/translation-evaluator.git
-cd translation-eval
+cd translation-evaluator
 ```
 2. Create the environment (with `conda`)
 ```sh
