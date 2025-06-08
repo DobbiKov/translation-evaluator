@@ -4,11 +4,11 @@ from comet import download_model, load_from_checkpoint
 
 def calculate_bleu(reference_text, hypothesis_text):
     """Calculates BLEU score."""
-    return sacrebleu.sentence_bleu([reference_text], hypothesis_text).score
+    return sacrebleu.sentence_bleu(hypothesis_text, [reference_text]).score
 
 def calculate_ter(reference_text, hypothesis_text):
     """Calculates TER score."""
-    return sacrebleu.sentence_ter([reference_text], hypothesis_text).score
+    return sacrebleu.sentence_ter(hypothesis_text, [reference_text]).score
 
 def calculate_bert_score(reference_text, hypothesis_text, lang='en'):
     """Calculates BERTScore."""

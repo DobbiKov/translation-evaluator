@@ -28,7 +28,11 @@ def evaluate_document_pair(source_path, llm_translated_path, human_ref_path, doc
             utils.log_message(f"Skipping NL metrics for {doc_id}: No human reference provided.", level='WARNING')
         else:
             human_ref_text = document_parser.extract_natural_language_text(human_ref_path, doc_format)
-            if human_ref_text:
+            if not human_ref_text:
+                utils.log_message(f"Human reference text for {doc_id} is empty after extraction. Skipping NL metrics.", level='WARNING')
+            elif not llm_translated_text:
+                utils.log_message(f"LLM translated text for {doc_id} is empty after extraction. Skipping NL metrics.", level='WARNING')
+            elif human_ref_text:
                 if config.RUN_BLEU:
                     results['nl_metrics']['bleu'] = nl_evaluator.calculate_bleu(human_ref_text, llm_translated_text)
                 if config.RUN_TER:

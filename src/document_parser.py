@@ -4,6 +4,7 @@ import json
 import pypandoc 
 from bs4 import BeautifulSoup 
 from pdfminer.high_level import extract_text 
+from src import utils
 
 def get_document_paths(base_dir, lang_code, doc_format):
     """Generates paths for all documents of a specific format and language."""
@@ -30,28 +31,42 @@ def get_document_paths(base_dir, lang_code, doc_format):
 def extract_natural_language_text(filepath, doc_format):
     """
     Extracts natural language text from a structured document.
-    This is a simplification; a full solution would ignore code blocks, math, etc.
-    Pandoc is good for this, but could also be done with regex for specific formats.
+    Handles potential errors during pandoc conversion by returning an empty string.
     """
-    if doc_format == 'latex':
-        try:
+    if not os.path.exists(filepath):
+        utils.log_message(f"File not found for text extraction: {filepath}", level='ERROR')
+        return ""
+
+    try:
+        text = "" # Initialize text
+        if doc_format == 'latex':
             text = pypandoc.convert_file(filepath, 'plain', format='latex')
-            text = re.sub(r'\\cite\{[^}]+\}', '', text) # Remove citations
-            text = re.sub(r'\\[a-zA-Z]+', '', text)    # Remove other commands
+            # Add more robust LaTeX cleaning (these are examples, adjust as needed)
+            text = re.sub(r'\\(begin|end)\{[^}]+\}', '', text) # Remove \begin{env} and \end{env}
+            text = re.sub(r'\\(section|subsection|subsubsection|paragraph|subparagraph)\*{0,1}\{.*?\}', '', text) # Remove section commands
+            text = re.sub(r'\\(?:ref|label|cite|eqref|textbf|textit|texttt|url)\{[^}]+\}', '', text) # Remove common commands
+            text = re.sub(r'\$(.*?)\$', '', text) # Remove inline math
+            text = re.sub(r'\$\$(.*?)\$\$', '', text) # Remove display math
+            text = re.sub(r'%.*?\n', '', text) # Remove LaTeX comments
+            text = re.sub(r'\\[a-zA-Z]+', '', text) # Remove other remaining commands (generic)
+            text = re.sub(r'\s+', ' ', text).strip() # Replace multiple spaces with single, strip whitespace
             return text
-        except Exception as e:
-            print(f"Error converting LaTeX to plain text with pandoc: {e}")
-            return ""
-    elif doc_format in ['markdown', 'myst']:
-        try:
+        elif doc_format in ['markdown', 'myst']:
+            # Use pypandoc to convert Markdown/Myst to plain text
             text = pypandoc.convert_file(filepath, 'plain', format=doc_format)
+            # Basic cleanup if pandoc leaves remnants
+            text = re.sub(r'#+\s*', '', text) # Remove markdown headings
+            text = re.sub(r'[*_`]', '', text) # Remove bold/italic/monospace markers
+            text = re.sub(r'\[.*?\]\(.*?\)', '', text) # Remove links
+            text = re.sub(r'\s+', ' ', text).strip()
             return text
-        except Exception as e:
-            print(f"Error converting {doc_format} to plain text with pandoc: {e}")
-            return ""
-    else:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            return f.read()
+        else:
+            # Fallback for unknown formats, read as plain text
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return f.read().strip()
+    except Exception as e:
+        utils.log_message(f"Failed to extract natural language text from '{filepath}' (format: {doc_format}): {e}", level='ERROR')
+        return ""
 
 def get_pandoc_ast(filepath, doc_format):
     """Converts a document to Pandoc's JSON Abstract Syntax Tree."""
