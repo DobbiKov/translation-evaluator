@@ -1,4 +1,4 @@
-# Translation Evaluation
+# Translation Evaluator
 
 A python tool to evaluate machine translation. The tool evaluates:
 - the Natural Language (NL) translation quality
