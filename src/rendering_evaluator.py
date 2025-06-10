@@ -1,152 +1,103 @@
-import json
-import re
-
-def compare_pandoc_asts(source_ast, target_ast, sensitivity='high'):
-    """
-    Compares two Pandoc ASTs recursively.
-    Identifies differences in structure (missing/extra/changed nodes)
-    and content (for non-text nodes that should be preserved).
-    """
-    differences = []
-
-    def _compare_node(path, node1, node2):
-        nonlocal differences
-
-        if node1 is None and node2 is None:
-            return
-        elif node1 is None:
-            differences.append({'path': path, 'type': 'extra_node', 'target_node': node2})
-            return
-        elif node2 is None:
-            differences.append({'path': path, 'type': 'missing_node', 'source_node': node1})
-            return
-
-        if node1.get('t') != node2.get('t'):
-            differences.append({'path': path, 'type': 'type_mismatch', 'source_type': node1.get('t'), 'target_type': node2.get('t')})
-            # Don't compare children if types differ, as it might lead to noise
-            return
-
-        node_type = node1.get('t')
-
-        # Handle specific node types
-        if node_type == 'Str' or node_type == 'Code' or node_type == 'RawBlock':
-            # For Str, we expect text to be translated.
-            # For Code/RawBlock, we expect exact preservation.
-            if node_type in ['Code', 'RawBlock'] and node1.get('c') != node2.get('c'):
-                 differences.append({'path': path, 'type': f'content_mismatch_{node_type}', 'source_content': node1.get('c'), 'target_content': node2.get('c')})
-            # For Str, we might want to do a basic text diff, but not necessarily a "structural" error.
-        elif node_type == 'Image':
-            # Check if image path (second element of 'c' list) is preserved
-            if len(node1['c']) > 1 and len(node2['c']) > 1 and node1['c'][1] != node2['c'][1]:
-                differences.append({'path': path, 'type': 'image_path_mismatch', 'source_path': node1['c'][1], 'target_path': node2['c'][1]})
-        elif node_type in ['Math', 'DisplayMath', 'InlineMath']:
-            # Math content 'c' should be identical
-            if node1['c'][1] != node2['c'][1]:
-                differences.append({'path': path, 'type': 'math_mismatch', 'source_math': node1['c'][1], 'target_math': node2['c'][1]})
-        elif node_type in ['Link', 'Citation']:
-            # Check target/key preservation
-            if node1['c'][2] != node2['c'][2]: # Link target
-                differences.append({'path': path, 'type': 'link_target_mismatch', 'source': node1['c'][2], 'target': node2['c'][2]})
-            if node1['c'][0] != node2['c'][0]: # Citation ID/key
-                 differences.append({'path': path, 'type': 'citation_key_mismatch', 'source': node1['c'][0], 'target': node2['c'][0]})
-
-
-        # Recurse on children if 'c' key exists and is a list
-        if 'c' in node1 and isinstance(node1['c'], list) and 'c' in node2 and isinstance(node2['c'], list):
-            # For list items, compare their children
-            min_len = min(len(node1['c']), len(node2['c']))
-            for i in range(min_len):
-                _compare_node(f"{path}.c[{i}]", node1['c'][i], node2['c'][i])
-            if len(node1['c']) > len(node2['c']):
-                for i in range(min_len, len(node1['c'])):
-                    differences.append({'path': f"{path}.c[{i}]", 'type': 'missing_child', 'source_node': node1['c'][i]})
-            elif len(node2['c']) > len(node1['c']):
-                for i in range(min_len, len(node2['c'])):
-                    differences.append({'path': f"{path}.c[{i}]", 'type': 'extra_child', 'target_node': node2['c'][i]})
-        elif 'c' in node1 and 'c' in node2 and node1['c'] != node2['c']:
-             # For other 'c' types (e.g., string attributes), direct comparison
-            differences.append({'path': path, 'type': 'attribute_mismatch_c', 'source_attr': node1['c'], 'target_attr': node2['c']})
-
-
-        # Check attributes that should be preserved (e.g., header levels, list types)
-        if node_type == 'Header' and (node1['c'][0] != node2['c'][0]): # Header level
-            differences.append({'path': path, 'type': 'header_level_mismatch', 'source_level': node1['c'][0], 'target_level': node2['c'][0]})
-        if node_type == 'List' and (node1['c'][0][0]['t'] != node2['c'][0][0]['t']): # List type (BulletList vs OrderedList)
-            differences.append({'path': path, 'type': 'list_type_mismatch', 'source_type': node1['c'][0][0]['t'], 'target_type': node2['c'][0][0]['t']})
-
-
-    _compare_node("root", source_ast, target_ast)
-    return differences
-
-def check_special_block_preservation(source_blocks, target_blocks):
-    """
-    Compares extracted special blocks for identity.
-    `source_blocks` and `target_blocks` are dictionaries from `extract_special_blocks`.
-    """
-    results = []
-
-    # Code blocks
-    if len(source_blocks['code_blocks']) != len(target_blocks['code_blocks']):
-        results.append({"type": "code_block_count_mismatch", "source_count": len(source_blocks['code_blocks']), "target_count": len(target_blocks['code_blocks'])})
-    else:
-        for i, (s_block, t_block) in enumerate(zip(source_blocks['code_blocks'], target_blocks['code_blocks'])):
-            if s_block != t_block:
-                results.append({"type": "code_block_content_mismatch", "index": i, "source_content": s_block, "target_content": t_block})
-
-    # Equations
-    if len(source_blocks['equations']) != len(target_blocks['equations']):
-        results.append({"type": "equation_count_mismatch", "source_count": len(source_blocks['equations']), "target_count": len(target_blocks['equations'])})
-    else:
-        for i, (s_eq, t_eq) in enumerate(zip(source_blocks['equations'], target_blocks['equations'])):
-            if s_eq != t_eq: # Simple string comparison for math markup
-                results.append({"type": "equation_content_mismatch", "index": i, "source_content": s_eq, "target_content": t_eq})
-
-    # Image paths (check if they are preserved and not translated)
-    if set(source_blocks['image_paths']) != set(target_blocks['image_paths']):
-        results.append({"type": "image_path_set_mismatch", "source_paths": list(source_blocks['image_paths']), "target_paths": list(target_blocks['image_paths'])})
-
-    return results
-
-def check_reference_integrity(source_blocks, target_blocks):
-    """
-    Checks if labels and references are preserved and consistent.
-    Assumes `source_blocks['labels']` and `target_blocks['labels']` contain dicts of {key: line_number}.
-    Assumes `source_blocks['references']` and `target_blocks['references']` contain lists of {key: line_number}.
-    """
-    results = []
-
-    # Check label preservation (keys should be identical)
-    source_label_keys = set(source_blocks['labels'].keys())
-    target_label_keys = set(target_blocks['labels'].keys())
-
-    missing_labels_in_target = list(source_label_keys - target_label_keys)
-    extra_labels_in_target = list(target_label_keys - source_label_keys)
-
-    if missing_labels_in_target:
-        results.append({"type": "missing_labels", "labels": missing_labels_in_target})
-    if extra_labels_in_target:
-        results.append({"type": "extra_labels", "labels": extra_labels_in_target})
-
-    # Check reference preservation (keys should be identical, and ideally point to existing labels)
-    source_ref_keys = [ref['key'] for ref in source_blocks['references']]
-    target_ref_keys = [ref['key'] for ref in target_blocks['references']]
-
-    # Simple count mismatch
-    if len(source_ref_keys) != len(target_ref_keys):
-        results.append({"type": "reference_count_mismatch", "source_count": len(source_ref_keys), "target_count": len(target_ref_keys)})
-
-    # More granular check: Check if all source refs appear in target refs, and if target refs point to valid labels
-    for i, s_ref_key in enumerate(source_ref_keys):
-        if i < len(target_ref_keys) and s_ref_key != target_ref_keys[i]:
-            results.append({"type": "reference_key_mismatch", "index": i, "source_key": s_ref_key, "target_key": target_ref_keys[i]})
-        elif i >= len(target_ref_keys):
-            results.append({"type": "missing_reference_in_target", "source_key": s_ref_key})
-
-    # Check if target references point to non-existent labels in the target document
-    for ref in target_blocks['references']:
-        if ref['key'] not in target_label_keys:
-            results.append({"type": "dangling_reference", "key": ref['key'], "line": ref['line']})
-
-    return results
-
+import os
+import subprocess
+from PIL import Image, ImageChops # Pillow for image manipulation
 import config 
+
+def compile_latex_to_pdf(latex_filepath, output_dir):
+    """Compiles a LaTeX file to PDF."""
+    try:
+        cmd = [
+            'pdflatex',
+            '-interaction=nonstopmode',
+            f'-output-directory={output_dir}',
+            latex_filepath
+        ]
+        # Run twice to ensure all cross-references are resolved
+        subprocess.run(cmd, check=True, capture_output=True)
+        subprocess.run(cmd, check=True, capture_output=True)
+        print(f"Compiled {os.path.basename(latex_filepath)} to PDF.")
+        # Return path to generated PDF
+        pdf_name = os.path.splitext(os.path.basename(latex_filepath))[0] + '.pdf'
+        return os.path.join(output_dir, pdf_name)
+    except subprocess.CalledProcessError as e:
+        print(f"Error compiling LaTeX {latex_filepath}: {e.stderr.decode()}")
+        return None
+    except FileNotFoundError:
+        print("pdflatex command not found. Ensure LaTeX distribution is installed and in PATH.")
+        return None
+
+def convert_pdf_to_images(pdf_filepath, output_dir, dpi=config.PDF_DPI):
+    """Converts each page of a PDF to a PNG image."""
+    try:
+        base_name = os.path.splitext(os.path.basename(pdf_filepath))[0]
+        # Using Ghostscript via command line for robust PDF to image conversion
+        output_pattern = os.path.join(output_dir, f"{base_name}_page%d.png")
+        cmd = [
+            'gs', # Ghostscript command
+            '-dNOPAUSE', '-dBATCH', '-sDEVICE=pngalpha',
+            f'-r{dpi}',
+            f'-sOutputFile={output_pattern}',
+            pdf_filepath
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        
+        # Collect paths to generated images
+        image_paths = []
+        i = 1
+        while True:
+            img_path = os.path.join(output_dir, f"{base_name}_page{i}.png")
+            if os.path.exists(img_path):
+                image_paths.append(img_path)
+                i += 1
+            else:
+                break
+        print(f"Converted {os.path.basename(pdf_filepath)} to {len(image_paths)} images.")
+        return image_paths
+    except subprocess.CalledProcessError as e:
+        print(f"Error converting PDF {pdf_filepath} to images: {e.stderr.decode()}")
+        return None
+    except FileNotFoundError:
+        print("Ghostscript (gs) command not found. Ensure it is installed and in PATH.")
+        return None
+
+def compare_images_visually(img1_path, img2_path, diff_output_path=None):
+    """
+    Compares two images and returns a 'difference score' (RMSE) and
+    optionally saves a visual diff image.
+    Lower RMSE is better (0 means identical).
+    """
+    try:
+        img1 = Image.open(img1_path).convert('RGB')
+        img2 = Image.open(img2_path).convert('RGB')
+
+        # Ensure images are same size
+        if img1.size != img2.size:
+            max_width = max(img1.width, img2.width)
+            max_height = max(img1.height, img2.height)
+            img1 = img1.resize((max_width, max_height), Image.Resampling.LANCZOS)
+            img2 = img2.resize((max_width, max_height), Image.Resampling.LANCZOS)
+            print(f"Warning: Images had different sizes. Resized to {img1.size}.")
+
+        diff = ImageChops.difference(img1, img2)
+        
+        # Calculate RMSE (Root Mean Square Error) as a diff score
+        # Sum of squared differences per pixel, then sqrt(mean)
+        stat = ImageChops.difference(img1, img2).getbbox() # For non-zero pixel check
+        if stat is None: # Images are identical
+            rmse = 0.0
+        else:
+            # Calculate root mean square error
+            squared_diff = sum(c**2 for c in diff.getdata())
+            rmse = (squared_diff / (img1.size[0] * img1.size[1]))**0.5
+
+        if diff_output_path:
+            # Highlight differences, e.g., using a red overlay
+            diff.save(diff_output_path)
+
+        return rmse
+    except Exception as e:
+        print(f"Error comparing images {img1_path} and {img2_path}: {e}")
+        return None
+
+
+
