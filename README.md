@@ -19,9 +19,9 @@ conda env create -f environment.yml
 
 ## How to Use and Expand
 1. Activate the environment (with `conda`)
-    ```sh
-    conda activate doc_eval_env
-    ```
+```sh
+conda activate doc_eval_env
+```
 
 2. Populate `data/`:
     - Place your original scientific documents in `data/source/`.
